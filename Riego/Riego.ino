@@ -1,37 +1,41 @@
 #include <ESP8266WiFi.h>
 #include <ArduinoWebsockets.h>
-#include "DHT2.h"
-#include "YL_69.h"
 #include <ArduinoJson.h>
 
-String ssid = "Spg"; // SSID
-String password = "abcd1234"; // Password
+#include "YL_69.h"
+#include "DHT2.h"
+
+String ssid = "CLARO1_D508E8"; // SSID
+String password = "92941mJaRH"; // Password
 String websockets_server = "wss://sistema-de-riego-iot.herokuapp.com/riego/"; //server
 String id = "23ff0c37-013b-477b-a21f-c0adc4524da6";
 String URL = websockets_server + id;
 
-DHT2 sensorTemperatura(11, DHT11);
-YL_69 sensorHumedadSuelo(A0);
-#define relePin 13
+#define DHTPIN D2     // Aquí puedes cambiar el pin a otro si es necesario. En este ejemplo, usamos el pin D2.
+#define DHTTYPE DHT11  
+
+YL_69<6> sensorHumedadSuelo(A0, 940, 0);
+DHT2 sensorTemperatura(DHTPIN, DHTTYPE);
+
+int humedad_objetivo, temperatura_maxima;
+int relePin = D0;
 bool releEstado = false;
 
-int humedad_objetivo = 60;
-
 using namespace websockets;
+
+WebsocketsClient cliente;
 
 void onMessageCallback(WebsocketsMessage message) {
     Serial.print("Mensaje recibido:");
     Serial.println(message.data());
-    // Crear un objeto JSON
-      StaticJsonDocument<200> doc;
     
-    // Deserializa el JSON
-    DeserializationError error = deserializeJson(doc, message.data());
-    if(doc["evento"] == "planta_cambiada")
-    {
-      humedad_objetivo = doc["humedad_objetivo"];
-      Serial.print("Nueva humedad: " + humedad_objetivo);
-    }
+    StaticJsonDocument<500> json;
+    DeserializationError error = deserializeJson(json, message.data());
+    
+    humedad_objetivo = int(json["humedad_objetivo"]);
+    temperatura_maxima = int(json["temperatura_maxima"]);
+    Serial.println("Planta cambiada a " + String(json["tipo"]) + ". Humedad objetivo: " + String(humedad_objetivo) + ", temperatura maxima: " + String(temperatura_maxima));
+    
 }
 
 void onEventsCallback(WebsocketsEvent event, String data) {
@@ -39,25 +43,20 @@ void onEventsCallback(WebsocketsEvent event, String data) {
         Serial.println("Conexion abierta");
     } else if(event == WebsocketsEvent::ConnectionClosed) {
         Serial.println("Conexion cerrada");
+        cliente.connect(URL);
     }
 }
 
-WebsocketsClient cliente;
-
 void setup()
 {
+  
   Serial.begin(9600);
   Serial.println();
 
-  // Rele
+  pinMode(relePin, OUTPUT);
 
-    pinMode(relePin, OUTPUT);
- 
-  // Sensor de temperatura y humedad ambiente
-
-    sensorTemperatura.begin();
-
-  WiFi.begin("Spg", "abcd1234");
+  sensorTemperatura.begin();
+  WiFi.begin(ssid, password);
 
   Serial.print("Conectando");
   while (WiFi.status() != WL_CONNECTED)
@@ -77,40 +76,45 @@ void setup()
     // Conectar
     cliente.connect(URL);
 }
+unsigned long tsend;
+
+#define T 0
+#define V 1
+#define H 2
+#define R 3
+
+String notificaciones[4];
 
 void loop() {
-  // Primero se hacen las mediciones
-
-    sensorTemperatura.medirTH(5000);
-    sensorHumedadSuelo.medirH(500);
-
-  // Send a ping
-    cliente.connect(URL);
-    cliente.poll();
-
-  if (sensorHumedadSuelo.humedad < humedad_objetivo)
+  sensorHumedadSuelo.medirH(500);
+  sensorTemperatura.readTemperature(5000);
+  cliente.poll();
+    
+  if (sensorHumedadSuelo.humedad < humedad_objetivo) // Si la humedad del suelo es baja o la temperatura alta y no esta bloqueado
   {
-    digitalWrite(relePin, HIGH);
-    releEstado = true;
+    releEstado = true; // Entonces activa el regado
   } else {
-    digitalWrite(relePin, LOW);
-    releEstado = false;
+    releEstado = false; // Si esta bloqueado o las condiciones son optimas entonces se desactiva el regado
   }
 
-  
-  // Crea un objeto de tipo StaticJsonDocument con una capacidad suficiente para almacenar tu JSON
-  StaticJsonDocument<200> doc;
+    digitalWrite(relePin, !releEstado);
 
-  // Agrega los pares clave-valor al documento
-  doc["evento"] = "actualizar_monitor";
-  doc["temperatura_medida"] = String(sensorTemperatura.temperatura);
-  doc["humedad_medida"] = String(sensorHumedadSuelo.humedad);
-  doc["riego_activado"] = String(releEstado);
+    if (millis()-tsend >= 1000)
+  {
+    tsend = millis();
 
-  // Serializa el JSON
-  serializeJson(doc, Serial);
-  cliente.send(String(Serial));
+    DynamicJsonDocument json(700);
+    json["evento"] = "actualizar_monitor";
+    json["humedad_medida"] = sensorHumedadSuelo.humedad;
+    json["temperatura_medida"] = sensorTemperatura.temperatura > 10 ? sensorTemperatura.temperatura : 31;
+    json["riego_activado"] = releEstado;
 
+    String jsonString;
+    serializeJson(json, jsonString);
+
+    // Serial.println("Mensaje enviado: " + jsonString);
+    cliente.send(jsonString);
+  }
 }
 
 

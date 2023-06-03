@@ -1,7 +1,13 @@
 #pragma once
 
- // Es una plantilla para que el array del suavizado sea de tamaño "dinamico"
-  class YL_69 // Usa el mixin para suavizar las lecturas
+// Archivos de cabecera
+
+#include "Mixin.h" // Archivo con clase mixin para suavizado de mediciones
+
+// Clase sensor humedad del suelo
+
+template <size_t totalMuestras = 1> // Es una plantilla para que el array del suavizado sea de tamaño "dinamico"
+  class YL_69 : private MediaMovilMixin<totalMuestras> // Usa el mixin para suavizar las lecturas
   {
     public:
       
@@ -17,6 +23,7 @@
       YL_69(int pinAnalogico, int calibracionAnalogicaMax = 1020, int calibracionAnalogicaMin = 370)
       {
         pinAn = pinAnalogico;
+        pinMode(pinAnalogico, INPUT);
         this->calibracionAnalogicaMax = calibracionAnalogicaMax; 
         this->calibracionAnalogicaMin = calibracionAnalogicaMin;
       }
@@ -40,7 +47,7 @@
                 preHumedad = preHumedad < 0 ? 0 : preHumedad; // Trunca la lectura de humedad al 0.00%
                 preHumedad = preHumedad > 100.00 ? 100.00 : preHumedad; // Trunca la lectura de humedad al 100.00% 
 
-                preHumedad = preHumedad;
+                preHumedad = this->mediaMovil(preHumedad);
 
               // Actualizacion del valor de humedad con la lectura procesada
 
